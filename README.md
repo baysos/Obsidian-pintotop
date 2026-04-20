@@ -80,6 +80,18 @@ Obsidian does not currently expose an official API for changing the built-in fil
 
 The plugin does not access the network and does not read note contents.
 
+## Compatibility
+
+Pin To Top changes the file explorer order at runtime. It may conflict with other plugins that also change the built-in file explorer order, file tree rendering, or folder sorting behavior.
+
+If pinned items do not appear in the expected position, try disabling other file explorer sorting or file tree replacement plugins first.
+
+## 兼容性说明
+
+Pin To Top 会在运行时调整 Obsidian 内置文件浏览器的排序结果，因此可能会与其他同样修改文件浏览器排序、文件树渲染或文件夹排序行为的插件发生冲突。
+
+如果置顶项没有出现在预期位置，建议先禁用其他文件浏览器排序类插件或文件树替代类插件后再测试。
+
 ## License
 
 MIT
