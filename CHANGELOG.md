@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5
+
+- Removed runtime style element creation to comply with Obsidian community plugin review requirements.
+- Removed an unnecessary file explorer view type assertion.
+
 ## 1.0.4
 
 - Added support for pinning items in the vault root.

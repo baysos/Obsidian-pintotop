@@ -32,8 +32,7 @@ type LocaleKey =
   | "clearAllPins"
   | "pinnedNotice"
   | "unpinnedNotice"
-  | "clearAllNotice"
-  | "pinnedBadge";
+  | "clearAllNotice";
 
 const TRANSLATIONS: Record<"zh" | "en", Record<LocaleKey, string>> = {
   zh: {
@@ -42,8 +41,7 @@ const TRANSLATIONS: Record<"zh" | "en", Record<LocaleKey, string>> = {
     clearAllPins: "清空所有置顶",
     pinnedNotice: "已置顶：{name}",
     unpinnedNotice: "已取消置顶：{name}",
-    clearAllNotice: "已清空所有置顶",
-    pinnedBadge: "置顶"
+    clearAllNotice: "已清空所有置顶"
   },
   en: {
     pin: "Pin to top",
@@ -51,14 +49,12 @@ const TRANSLATIONS: Record<"zh" | "en", Record<LocaleKey, string>> = {
     clearAllPins: "Clear all pinned items",
     pinnedNotice: "Pinned: {name}",
     unpinnedNotice: "Unpinned: {name}",
-    clearAllNotice: "Cleared all pinned items",
-    pinnedBadge: "Pinned"
+    clearAllNotice: "Cleared all pinned items"
   }
 };
 
 export default class PinToTopPlugin extends Plugin {
   private settings: PinToTopSettings = structuredClone(DEFAULT_SETTINGS);
-  private styleEl: HTMLStyleElement | null = null;
   private patchedViews = new Set<FileExplorerViewWithPatch>();
 
   /**
@@ -66,8 +62,6 @@ export default class PinToTopPlugin extends Plugin {
    */
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.createStyleElement();
-    this.rebuildPinnedStyles();
 
     this.app.workspace.onLayoutReady(() => {
       this.patchFileExplorerViews();
@@ -108,12 +102,10 @@ export default class PinToTopPlugin extends Plugin {
   }
 
   /**
-   * 卸载插件时移除动态样式。
+   * 卸载插件时恢复被补丁过的文件浏览器排序方法。
    */
   onunload(): void {
     this.restoreFileExplorerViews();
-    this.styleEl?.remove();
-    this.styleEl = null;
   }
 
   /**
@@ -133,15 +125,6 @@ export default class PinToTopPlugin extends Plugin {
    */
   private async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-  }
-
-  /**
-   * 创建用于置顶排序的动态样式节点。
-   */
-  private createStyleElement(): void {
-    this.styleEl = document.createElement("style");
-    this.styleEl.id = "pin-to-top-dynamic-styles";
-    document.head.appendChild(this.styleEl);
   }
 
   /**
@@ -174,7 +157,6 @@ export default class PinToTopPlugin extends Plugin {
     });
 
     await this.saveSettings();
-    this.rebuildPinnedStyles();
     this.refreshFileExplorerSort();
     new Notice(this.t("pinnedNotice", { name: file.name }));
   }
@@ -190,7 +172,6 @@ export default class PinToTopPlugin extends Plugin {
 
     this.settings.pins = this.settings.pins.filter((item) => item.path !== path);
     await this.saveSettings();
-    this.rebuildPinnedStyles();
     this.refreshFileExplorerSort();
 
     if (showNotice) {
@@ -205,7 +186,6 @@ export default class PinToTopPlugin extends Plugin {
   private async clearAllPins(): Promise<void> {
     this.settings.pins = [];
     await this.saveSettings();
-    this.rebuildPinnedStyles();
     this.refreshFileExplorerSort();
     new Notice(this.t("clearAllNotice"));
   }
@@ -223,7 +203,6 @@ export default class PinToTopPlugin extends Plugin {
     pin.parentPath = this.getParentPath(file);
 
     await this.saveSettings();
-    this.rebuildPinnedStyles();
     this.refreshFileExplorerSort();
   }
 
@@ -232,7 +211,7 @@ export default class PinToTopPlugin extends Plugin {
    */
   private patchFileExplorerViews(): void {
     for (const view of this.getFileExplorerViews()) {
-      const patchedView = view as FileExplorerViewWithPatch;
+      const patchedView = view;
       if (typeof patchedView.getSortedFolderItems !== "function" || patchedView[PATCHED_SORT_KEY]) {
         continue;
       }
@@ -280,10 +259,27 @@ export default class PinToTopPlugin extends Plugin {
    * 从当前工作区中获取文件浏览器视图。这里访问的是 Obsidian 内部视图对象，所以只做鸭子类型判断。
    */
   private getFileExplorerViews(): FileExplorerViewWithPatch[] {
-    return this.app.workspace
-      .getLeavesOfType(FILE_EXPLORER_VIEW_TYPE)
-      .map((leaf) => leaf.view as unknown as FileExplorerViewWithPatch)
-      .filter((view) => typeof view?.getViewType === "function" && view.getViewType() === FILE_EXPLORER_VIEW_TYPE);
+    const views: FileExplorerViewWithPatch[] = [];
+
+    for (const leaf of this.app.workspace.getLeavesOfType(FILE_EXPLORER_VIEW_TYPE)) {
+      if (this.isFileExplorerView(leaf.view)) {
+        views.push(leaf.view);
+      }
+    }
+
+    return views;
+  }
+
+  /**
+   * 判断工作区视图是否是文件浏览器视图。
+   */
+  private isFileExplorerView(view: unknown): view is FileExplorerViewWithPatch {
+    if (!view || typeof view !== "object") {
+      return false;
+    }
+
+    const candidate = view as FileExplorerViewWithPatch;
+    return typeof candidate.getViewType === "function" && candidate.getViewType() === FILE_EXPLORER_VIEW_TYPE;
   }
 
   /**
@@ -310,32 +306,6 @@ export default class PinToTopPlugin extends Plugin {
   }
 
   /**
-   * 重新生成置顶标记样式。
-   */
-  private rebuildPinnedStyles(): void {
-    if (!this.styleEl) {
-      return;
-    }
-
-    const rules: string[] = [];
-    const sortedPins = [...this.settings.pins].sort((a, b) => b.pinnedAt - a.pinnedAt);
-    const pinnedBadge = this.escapeCssString(this.t("pinnedBadge"));
-
-    sortedPins.forEach((pin) => {
-      const path = this.escapeAttributeValue(pin.path);
-
-      rules.push(
-        `.nav-file-title[data-path="${path}"]::after, ` +
-        `.nav-folder-title[data-path="${path}"]::after, ` +
-        `.tree-item-self[data-path="${path}"]::after { ` +
-        `color: var(--text-accent); content: "${pinnedBadge}"; font-size: var(--font-ui-smaller); margin-left: 8px; }`
-      );
-    });
-
-    this.styleEl.textContent = rules.join("\n");
-  }
-
-  /**
    * 判断路径是否已置顶。
    */
   private isPinned(path: string): boolean {
@@ -347,16 +317,6 @@ export default class PinToTopPlugin extends Plugin {
    */
   private getParentPath(file: TAbstractFile): string {
     return file.parent?.path === "/" ? "" : file.parent?.path ?? "";
-  }
-
-  /**
-   * 转义 CSS 属性选择器中的路径。
-   */
-  private escapeAttributeValue(value: string): string {
-    return value
-      .replace(/\\/g, "\\\\")
-      .replace(/"/g, "\\\"")
-      .replace(/\n/g, "\\A ");
   }
 
   /**
@@ -372,13 +332,6 @@ export default class PinToTopPlugin extends Plugin {
     }
 
     return text;
-  }
-
-  /**
-   * 转义 CSS content 字符串。
-   */
-  private escapeCssString(value: string): string {
-    return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
   }
 }
 
