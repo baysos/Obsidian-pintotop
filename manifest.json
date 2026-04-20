@@ -1,7 +1,7 @@
 {
   "id": "pin-to-top",
   "name": "Pin To Top",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "minAppVersion": "1.5.0",
   "description": "Pin files and folders to the top of their current folder in the file explorer.",
   "author": "baysos",

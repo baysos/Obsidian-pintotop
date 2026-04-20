@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.6
+
+- Restored the pinned text badge using static CSS and DOM attributes instead of runtime style element creation.
+
 ## 1.0.5
 
 - Removed runtime style element creation to comply with Obsidian community plugin review requirements.

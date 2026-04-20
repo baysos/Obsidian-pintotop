@@ -1,1 +1,6 @@
-/* Pin To Top does not require custom styles. */
+.pin-to-top-pinned::after {
+  color: var(--text-accent);
+  content: attr(data-pin-to-top-label);
+  font-size: var(--font-ui-smaller);
+  margin-left: 8px;
+}

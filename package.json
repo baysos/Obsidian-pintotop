@@ -1,6 +1,6 @@
 {
   "name": "pin-to-top",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Pin files and folders to the top of their current folder in the Obsidian file explorer.",
   "main": "main.js",
   "scripts": {

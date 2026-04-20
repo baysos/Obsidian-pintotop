@@ -25,6 +25,9 @@ const DEFAULT_SETTINGS: PinToTopSettings = {
 
 const FILE_EXPLORER_VIEW_TYPE = "file-explorer";
 const PATCHED_SORT_KEY = "__pinToTopOriginalGetSortedFolderItems";
+const PINNED_MARKER_CLASS = "pin-to-top-pinned";
+const PINNED_MARKER_LABEL_ATTR = "data-pin-to-top-label";
+const PINNED_MARKER_SELECTOR = ".nav-file-title[data-path], .nav-folder-title[data-path], .tree-item-self[data-path]";
 
 type LocaleKey =
   | "pin"
@@ -32,7 +35,8 @@ type LocaleKey =
   | "clearAllPins"
   | "pinnedNotice"
   | "unpinnedNotice"
-  | "clearAllNotice";
+  | "clearAllNotice"
+  | "pinnedBadge";
 
 const TRANSLATIONS: Record<"zh" | "en", Record<LocaleKey, string>> = {
   zh: {
@@ -41,7 +45,8 @@ const TRANSLATIONS: Record<"zh" | "en", Record<LocaleKey, string>> = {
     clearAllPins: "清空所有置顶",
     pinnedNotice: "已置顶：{name}",
     unpinnedNotice: "已取消置顶：{name}",
-    clearAllNotice: "已清空所有置顶"
+    clearAllNotice: "已清空所有置顶",
+    pinnedBadge: "置顶"
   },
   en: {
     pin: "Pin to top",
@@ -49,13 +54,16 @@ const TRANSLATIONS: Record<"zh" | "en", Record<LocaleKey, string>> = {
     clearAllPins: "Clear all pinned items",
     pinnedNotice: "Pinned: {name}",
     unpinnedNotice: "Unpinned: {name}",
-    clearAllNotice: "Cleared all pinned items"
+    clearAllNotice: "Cleared all pinned items",
+    pinnedBadge: "Pinned"
   }
 };
 
 export default class PinToTopPlugin extends Plugin {
   private settings: PinToTopSettings = structuredClone(DEFAULT_SETTINGS);
   private patchedViews = new Set<FileExplorerViewWithPatch>();
+  private markerObserver: MutationObserver | null = null;
+  private markerUpdateTimer: number | null = null;
 
   /**
    * 加载插件并注册文件菜单、文件变更事件。
@@ -65,6 +73,7 @@ export default class PinToTopPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(() => {
       this.patchFileExplorerViews();
+      this.startPinnedMarkerObserver();
       this.refreshFileExplorerSort();
     });
 
@@ -77,6 +86,7 @@ export default class PinToTopPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
         this.patchFileExplorerViews();
+        this.schedulePinnedMarkerUpdate();
       })
     );
 
@@ -106,6 +116,8 @@ export default class PinToTopPlugin extends Plugin {
    */
   onunload(): void {
     this.restoreFileExplorerViews();
+    this.stopPinnedMarkerObserver();
+    this.clearPinnedMarkers();
   }
 
   /**
@@ -158,6 +170,7 @@ export default class PinToTopPlugin extends Plugin {
 
     await this.saveSettings();
     this.refreshFileExplorerSort();
+    this.schedulePinnedMarkerUpdate();
     new Notice(this.t("pinnedNotice", { name: file.name }));
   }
 
@@ -173,6 +186,7 @@ export default class PinToTopPlugin extends Plugin {
     this.settings.pins = this.settings.pins.filter((item) => item.path !== path);
     await this.saveSettings();
     this.refreshFileExplorerSort();
+    this.schedulePinnedMarkerUpdate();
 
     if (showNotice) {
       const file = this.app.vault.getAbstractFileByPath(path);
@@ -187,6 +201,7 @@ export default class PinToTopPlugin extends Plugin {
     this.settings.pins = [];
     await this.saveSettings();
     this.refreshFileExplorerSort();
+    this.schedulePinnedMarkerUpdate();
     new Notice(this.t("clearAllNotice"));
   }
 
@@ -204,6 +219,7 @@ export default class PinToTopPlugin extends Plugin {
 
     await this.saveSettings();
     this.refreshFileExplorerSort();
+    this.schedulePinnedMarkerUpdate();
   }
 
   /**
@@ -253,6 +269,81 @@ export default class PinToTopPlugin extends Plugin {
         view.sort();
       }
     }
+
+    this.schedulePinnedMarkerUpdate();
+  }
+
+  /**
+   * 监听文件浏览器 DOM 重新渲染，只补充置顶文字标记，不触发文件树刷新。
+   */
+  private startPinnedMarkerObserver(): void {
+    if (this.markerObserver) {
+      return;
+    }
+
+    this.markerObserver = new MutationObserver(() => {
+      this.schedulePinnedMarkerUpdate();
+    });
+    this.markerObserver.observe(document.body, { childList: true, subtree: true });
+    this.schedulePinnedMarkerUpdate();
+  }
+
+  /**
+   * 停止监听文件树 DOM 变化。
+   */
+  private stopPinnedMarkerObserver(): void {
+    this.markerObserver?.disconnect();
+    this.markerObserver = null;
+
+    if (this.markerUpdateTimer !== null) {
+      window.clearTimeout(this.markerUpdateTimer);
+      this.markerUpdateTimer = null;
+    }
+  }
+
+  /**
+   * 延迟合并多次 DOM 变化，避免展开文件夹时重复扫描。
+   */
+  private schedulePinnedMarkerUpdate(): void {
+    if (this.markerUpdateTimer !== null) {
+      window.clearTimeout(this.markerUpdateTimer);
+    }
+
+    this.markerUpdateTimer = window.setTimeout(() => {
+      this.markerUpdateTimer = null;
+      this.updatePinnedMarkers();
+    }, 50);
+  }
+
+  /**
+   * 给当前已渲染的置顶文件树节点添加文字标记。
+   */
+  private updatePinnedMarkers(): void {
+    const pinnedPaths = new Set(this.settings.pins.map((pin) => pin.path));
+    const pinnedBadge = this.t("pinnedBadge");
+
+    document.querySelectorAll<HTMLElement>(PINNED_MARKER_SELECTOR).forEach((element) => {
+      const path = element.getAttribute("data-path");
+      const isPinned = path !== null && pinnedPaths.has(path);
+
+      if (isPinned) {
+        element.classList.add(PINNED_MARKER_CLASS);
+        element.setAttribute(PINNED_MARKER_LABEL_ATTR, pinnedBadge);
+      } else {
+        element.classList.remove(PINNED_MARKER_CLASS);
+        element.removeAttribute(PINNED_MARKER_LABEL_ATTR);
+      }
+    });
+  }
+
+  /**
+   * 卸载插件时清理已经加到文件树节点上的标记。
+   */
+  private clearPinnedMarkers(): void {
+    document.querySelectorAll<HTMLElement>(`.${PINNED_MARKER_CLASS}`).forEach((element) => {
+      element.classList.remove(PINNED_MARKER_CLASS);
+      element.removeAttribute(PINNED_MARKER_LABEL_ATTR);
+    });
   }
 
   /**
